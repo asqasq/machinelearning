@@ -1,5 +1,5 @@
 # machinelearning
 
-This repository contains machine learning workloads with Kerasm Tensorflow
+This repository contains machine learning workloads with Keras, Tensorflow
 and Spark.
 
