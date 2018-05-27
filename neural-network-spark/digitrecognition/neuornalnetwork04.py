@@ -16,8 +16,7 @@ class mnist_loader(object):
         startidx = idx[0]
         endidx = idx[1]
         print("Loading files from idx ",startidx," to idx ",endidx,"...")
-        fs = pa.hdfs.connect('localhost', 9000, user='asq',
-                    driver='libhdfs')
+        fs = pa.hdfs.connect()
 
         f = fs.open('/train-images-idx3-ubyte')
         f.seek(startidx*28*28+16)
