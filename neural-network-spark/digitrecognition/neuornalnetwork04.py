@@ -5,14 +5,43 @@ from keras.models import Sequential
 import keras.layers as ll
 import pyarrow as pa
 from keras.models import model_from_json
-
+import cPickle as pickle
 
 class mnist_loader(object):
     def __init__(self):
         print("nuet")
         
     
-    def load(self, idx):
+    def load(self, idx, use_data_caching):
+        if use_data_caching==1:
+            startidx = idx[0]
+            endidx = idx[1]
+            filename = '/tmp/preprocessedmnist_{0}_{1}.dat'.format(startidx, endidx)
+            try:
+                f = open(filename, "r")
+                X_train = pickle.load(f)
+                y_train = pickle.load(f)
+                X_test  = pickle.load(f)
+                y_test  = pickle.load(f)
+                f.close()
+                print "Loaded from cache"
+            except IOError as e:
+                X_train, y_train, X_test, y_test = self.loadFromOriginalFiles(idx)
+                f = open(filename, "w")
+                pickle.dump(X_train, f)
+                pickle.dump(y_train, f)
+                pickle.dump(X_test, f)
+                pickle.dump(y_test, f)
+                f.close()
+                print "Loaded from file"
+        else:
+            X_train, y_train, X_test, y_test = self.loadFromOriginalFiles(idx)
+            print "Loaded from file"
+
+        return(X_train, y_train, X_test, y_test)
+
+
+    def loadFromOriginalFiles(self, idx):
         startidx = idx[0]
         endidx = idx[1]
         print("Loading files from idx ",startidx," to idx ",endidx,"...")
@@ -68,10 +97,9 @@ class mnist_loader(object):
         
         return(X_train, y_train, X_test, y_test)
 
-def runNetwork(idx, weights, model_json):
-
+def runNetwork(idx, weights, model_json, use_data_caching):
     loader = mnist_loader()
-    X_train, y_train, X_test, y_test = loader.load(idx)
+    X_train, y_train, X_test, y_test = loader.load(idx, use_data_caching)
 
     #the network
     model = model_from_json(model_json)
@@ -94,7 +122,7 @@ if __name__ == "__main__":
   sc = SparkContext(conf=conf)
 
   loader = mnist_loader()
-  X_train, y_train, X_test, y_test = loader.load((0,1))
+  X_train, y_train, X_test, y_test = loader.loadFromOriginalFiles((0,1))
 
   #the network
   model = Sequential(name="mlp")
@@ -116,7 +144,7 @@ if __name__ == "__main__":
   idxp = sc.parallelize(idx,4)
   
   for i in xrange(10):
-    o=idxp.map(lambda x:runNetwork(x, weights, model_json)).collect()
+    o=idxp.map(lambda x:runNetwork(x, weights, model_json, 0)).collect()
     npo=np.array(o)
     print "Fertig."
   
