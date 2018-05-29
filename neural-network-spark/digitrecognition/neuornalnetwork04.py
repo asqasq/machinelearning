@@ -8,6 +8,7 @@ from keras.models import model_from_json
 import cPickle as pickle
 import time
 from datetime import datetime
+import struct
 
 class mnist_loader(object):
     def __init__(self):
@@ -53,7 +54,7 @@ class mnist_loader(object):
         print "Connection time: {0:.4f}".format(t1-t0)
 
         t0 = time.time()
-        f = fs.open('/train-images-idx3-ubyte')
+        f = fs.open('/train-images-idx3-ubyte-4')
         f.seek(startidx*28*28+16)
         t1 = time.time()
         print "Open and seek time: {0:.4f}".format(t1-t0)
@@ -74,7 +75,7 @@ class mnist_loader(object):
         t1 = time.time()
         print "Parsing X_train time: {0:.4f}".format(t1-t0)
         
-        f = fs.open('/train-labels-idx1-ubyte')
+        f = fs.open('/train-labels-idx1-ubyte-4')
         f.seek(startidx+8)
         trainraw = f.read(endidx - startidx)
         f.close()
@@ -111,6 +112,16 @@ class mnist_loader(object):
         
         return(X_train, y_train, X_test, y_test)
 
+    def readNrSamples(self):
+        fs = pa.hdfs.connect()
+
+        f = fs.open('/train-images-idx3-ubyte-4')
+        f.seek(4)
+        nr_samples = struct.unpack('>i', f.read(4))[0]
+        print "\n\n\n\nNr samples = ",nr_samples
+        f.close()
+        return nr_samples
+
 def runNetwork(idx, weights, model_json, use_data_caching):
     loader = mnist_loader()
     X_train, y_train, X_test, y_test = loader.load(idx, use_data_caching)
@@ -137,6 +148,7 @@ if __name__ == "__main__":
 
   loader = mnist_loader()
   X_train, y_train, X_test, y_test = loader.loadFromOriginalFiles((0,1))
+  nr_samples = loader.readNrSamples()
 
   #the network
   model = Sequential(name="mlp")
@@ -155,8 +167,7 @@ if __name__ == "__main__":
   weights=model.get_weights()
     
   
-  nr_partitions = 20
-  nr_samples = 60000
+  nr_partitions = 4
   nr_samples_partition = nr_samples / nr_partitions
   idx = []
   for i in xrange(nr_partitions):
