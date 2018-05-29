@@ -6,6 +6,8 @@ import keras.layers as ll
 import pyarrow as pa
 from keras.models import model_from_json
 import cPickle as pickle
+import time
+from datetime import datetime
 
 class mnist_loader(object):
     def __init__(self):
@@ -45,20 +47,32 @@ class mnist_loader(object):
         startidx = idx[0]
         endidx = idx[1]
         print("Loading files from idx ",startidx," to idx ",endidx,"...")
+        t0 = time.time()
         fs = pa.hdfs.connect()
+        t1 = time.time()
+        print "Connection time: {0:.4f}".format(t1-t0)
 
+        t0 = time.time()
         f = fs.open('/train-images-idx3-ubyte')
         f.seek(startidx*28*28+16)
+        t1 = time.time()
+        print "Open and seek time: {0:.4f}".format(t1-t0)
+        t0 = time.time()
         trainraw = f.read((endidx - startidx) * 28*28)
+        t1 = time.time()
+        print "Read time: {0:.4f}".format(t1-t0)
         f.close()
         trainbytes = bytearray(trainraw)
         
+        t0 = time.time()
         t = []
         for i in xrange(0, endidx - startidx):
             subarray = np.array([trainbytes[i*28*28:(i+1)*28*28]]).reshape(28,28)
             subarray = subarray / 255.0
             t.append(subarray)
         X_train = np.array(t)
+        t1 = time.time()
+        print "Parsing X_train time: {0:.4f}".format(t1-t0)
         
         f = fs.open('/train-labels-idx1-ubyte')
         f.seek(startidx+8)
@@ -140,8 +154,16 @@ if __name__ == "__main__":
   model_json = model.to_json()
   weights=model.get_weights()
     
-  idx = [(0,15000),(15000,30000),(30000,45000),(45000,60000)]
-  idxp = sc.parallelize(idx,4)
+  
+  nr_partitions = 20
+  nr_samples = 60000
+  nr_samples_partition = nr_samples / nr_partitions
+  idx = []
+  for i in xrange(nr_partitions):
+    idx.append((i * nr_samples_partition, (i + 1) * nr_samples_partition))
+  print "idx = ", idx
+  #idx = [(0,15000),(15000,30000),(30000,45000),(45000,60000)]
+  idxp = sc.parallelize(idx, nr_partitions)
   
   for i in xrange(10):
     o=idxp.map(lambda x:runNetwork(x, weights, model_json, 0)).collect()
