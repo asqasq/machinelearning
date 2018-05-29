@@ -9,10 +9,20 @@ import cPickle as pickle
 import time
 from datetime import datetime
 import struct
+from argparse import ArgumentParser
+import os
 
 class mnist_loader(object):
-    def __init__(self):
-        print("nuet")
+    def __init__(self, path, scale):
+        self.trainingimagesfile = os.path.join(path, "/train-images-idx3-ubyte")
+        self.traininglabelsfile = os.path.join(path, "/train-labels-idx1-ubyte")
+        if scale > 1:
+            self.trainingimagesfile = "{0}-{1}".format(self.trainingimagesfile, scale)
+            self.traininglabelsfile = '{0}-{1}'.format(self.traininglabelsfile, scale)
+        self.testimagesfile = os.path.join(path, '/t10k-images-idx3-ubyte')
+        self.testlabelsfile = os.path.join(path, '/t10k-labels-idx1-ubyte')
+
+        print "Using:\n\ttraining images {0}\n\ttraining labels {1}\n\ttest images {2}\n\ttest labels {3}\n".format(self.trainingimagesfile, self.traininglabelsfile, self.testimagesfile, self.testlabelsfile)
         
     
     def load(self, idx, use_data_caching):
@@ -54,7 +64,7 @@ class mnist_loader(object):
         print "Connection time: {0:.4f}".format(t1-t0)
 
         t0 = time.time()
-        f = fs.open('/train-images-idx3-ubyte-4')
+        f = fs.open(self.trainingimagesfile)
         f.seek(startidx*28*28+16)
         t1 = time.time()
         print "Open and seek time: {0:.4f}".format(t1-t0)
@@ -75,7 +85,7 @@ class mnist_loader(object):
         t1 = time.time()
         print "Parsing X_train time: {0:.4f}".format(t1-t0)
         
-        f = fs.open('/train-labels-idx1-ubyte-4')
+        f = fs.open(self.traininglabelsfile)
         f.seek(startidx+8)
         trainraw = f.read(endidx - startidx)
         f.close()
@@ -90,7 +100,7 @@ class mnist_loader(object):
         
         
         
-        trainraw = fs.cat('/t10k-images-idx3-ubyte')
+        trainraw = fs.cat(self.testimagesfile)
         trainbytes = bytearray(trainraw)
         
         t = []
@@ -100,7 +110,7 @@ class mnist_loader(object):
             t.append(subarray)
         X_test = np.array(t)
         
-        trainraw = fs.cat('/t10k-labels-idx1-ubyte')
+        trainraw = fs.cat(self.testlabelsfile)
         trainbytes = bytearray(trainraw)
         
         l = []
@@ -115,15 +125,15 @@ class mnist_loader(object):
     def readNrSamples(self):
         fs = pa.hdfs.connect()
 
-        f = fs.open('/train-images-idx3-ubyte-4')
+        f = fs.open(self.trainingimagesfile)
         f.seek(4)
         nr_samples = struct.unpack('>i', f.read(4))[0]
         print "\n\n\n\nNr samples = ",nr_samples
         f.close()
         return nr_samples
 
-def runNetwork(idx, weights, model_json, use_data_caching):
-    loader = mnist_loader()
+def runNetwork(idx, weights, model_json, use_data_caching, path, scale):
+    loader = mnist_loader(path, scale)
     X_train, y_train, X_test, y_test = loader.load(idx, use_data_caching)
 
     #the network
@@ -142,11 +152,28 @@ def runNetwork(idx, weights, model_json, use_data_caching):
 
 if __name__ == "__main__":
 
+  # parse command line arguments
+  parser = ArgumentParser()
+  parser.add_argument("-p", "--path", dest="path",
+                      help="Path to train and test images and labels on HDFS",
+                      required=True)
+  parser.add_argument("-s", "--scale", dest="scale", default=1,
+                      help="Dataset scaling factor", required=False)
+  parser.add_argument("-c", "--caching", dest="caching", default=0,
+                      help="Caching strategy: 0 = disabled (default), 1 = enabled",
+                      required=False)
+  parser.add_argument("-t", "--tasks", dest="nr_tasks", type=int, default=4,
+                      help="Nr of Spark tasks (default = 4)",
+                      required=False)
+
+  args = parser.parse_args()
+
+
   # create Spark context with Spark configuration
   conf = SparkConf().setAppName("Spark Count")
   sc = SparkContext(conf=conf)
 
-  loader = mnist_loader()
+  loader = mnist_loader(args.path, args.scale)
   X_train, y_train, X_test, y_test = loader.loadFromOriginalFiles((0,1))
   nr_samples = loader.readNrSamples()
 
@@ -167,17 +194,19 @@ if __name__ == "__main__":
   weights=model.get_weights()
     
   
-  nr_partitions = 4
+  nr_partitions = args.nr_tasks
   nr_samples_partition = nr_samples / nr_partitions
   idx = []
   for i in xrange(nr_partitions):
     idx.append((i * nr_samples_partition, (i + 1) * nr_samples_partition))
   print "idx = ", idx
-  #idx = [(0,15000),(15000,30000),(30000,45000),(45000,60000)]
   idxp = sc.parallelize(idx, nr_partitions)
   
   for i in xrange(10):
-    o=idxp.map(lambda x:runNetwork(x, weights, model_json, 0)).collect()
+    o=idxp.map(lambda x:runNetwork(x, weights, model_json,
+                                   args.caching,
+                                   args.path,
+                                   args.scale)).collect()
     npo=np.array(o)
     print "Fertig."
   
